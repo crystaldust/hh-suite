@@ -23,7 +23,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-
+#include <errno.h>
 
 #include "ffindex.h"
 #include "ffutil.h"
@@ -63,23 +63,46 @@ int main(int argn, char **argv)
 
   size_t range_start = 0;
   size_t range_end = index->n_entries;
+  size_t num_batches = 500;
+  size_t batch_size = index->n_entries / num_batches; // Is size_t auto truncated like integers?
 
-  // Foreach entry
-  //#pragma omp parallel for
-  for(size_t entry_index = range_start; entry_index < range_end; entry_index++)
-  {
-    //fprintf(stderr, "index %ld\n", entry_index);
+  printf("%ld entries, in %ld batches, batch_size: %ld\n", index->n_entries, num_batches, batch_size);
 
-    ffindex_entry_t* entry = ffindex_get_entry_by_index(index, entry_index);
-    if(entry == NULL) { perror(entry->name); continue; }
+  char *content = NULL;
+  char *content_ = NULL;
+  size_t num_allocated = 0;
+  size_t batch_end = 0;
 
-    FILE *output_file = fopen(entry->name, "w");
+  for(size_t entry_index=range_start; entry_index < range_end; entry_index+=batch_size) {
+    content = NULL;
+    num_allocated = 0;
+    batch_end = entry_index + batch_size < range_end ? entry_index + batch_size : range_end;
+    printf("%ld, from %ld to %ld\n", entry_index / batch_size, entry_index, batch_end);
+    for (size_t i=entry_index; i<batch_end; ++i) {
+      ffindex_entry_t *entry = ffindex_get_entry_by_index(index, i);
+      if (NULL == content) {
+        content = malloc(sizeof(char) * entry->length-1);
+        memcpy(content, data+entry->offset, entry->length-1);
+      } else {
+        content_ = realloc(content, num_allocated+entry->length-1);
+        if (NULL == content_) {
+          printf("failed to reallocate\n");
+        }
+        memcpy(content_+num_allocated, data+entry->offset, entry->length-1);
+        content = content_;
+      }
+      num_allocated += entry->length - 1;
+    }
 
-    // Write file data to child's stdin.
-    char *filedata = ffindex_get_data_by_entry(data, entry);
-    size_t written = fwrite(filedata, entry->length - 1, 1, output_file);
-    if(written < 1)   { perror(entry->name); break; }
-
+    char output_filename[256];
+    snprintf(output_filename, 256, "%ld.txt", entry_index / batch_size);
+    FILE *output_file = fopen(output_filename, "w");
+    if (NULL == output_file) {
+      printf("Failed to create file %s, errno: %d, error: %s", output_filename, errno, strerror(errno));
+      continue;
+    }
+    size_t written = fwrite(content, sizeof(char), num_allocated, output_file);
+    printf("%ld, written: %ld\n", (entry_index/batch_size), written);
     fclose(output_file);
   }
 
