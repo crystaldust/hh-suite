@@ -75,15 +75,19 @@ int main(int argn, char **argv)
 
   for(size_t entry_index=range_start; entry_index < range_end; entry_index+=batch_size) {
     content = NULL;
+    content_ = NULL;
     num_allocated = 0;
     batch_end = entry_index + batch_size < range_end ? entry_index + batch_size : range_end;
     printf("%ld, from %ld to %ld\n", entry_index / batch_size, entry_index, batch_end);
     for (size_t i=entry_index; i<batch_end; ++i) {
       ffindex_entry_t *entry = ffindex_get_entry_by_index(index, i);
       if (NULL == content) {
+//        printf("try to allocate content\n");
         content = malloc(sizeof(char) * entry->length-1);
         memcpy(content, data+entry->offset, entry->length-1);
+//        printf("content allocated and copied\n");
       } else {
+//        printf("try to reallocate content\n");
         content_ = realloc(content, num_allocated+entry->length-1);
         if (NULL == content_) {
           printf("failed to reallocate\n");
@@ -104,6 +108,14 @@ int main(int argn, char **argv)
     size_t written = fwrite(content, sizeof(char), num_allocated, output_file);
     printf("%ld, written: %ld\n", (entry_index/batch_size), written);
     fclose(output_file);
+
+//    printf("content addr: %p, content_ addr: %p\n", content, content_);
+
+    // content and content_ are very likely to point to the same addr
+    // take it carefully
+    free(content);
+
+//    free(content_); // Don't free the same addr twice.
   }
 
   return 0;
